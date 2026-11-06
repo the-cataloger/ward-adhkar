@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">وِرد | أذكار الصباح والمساء</string>
+    <string name="channel_title">تذكير الأذكار</string>
+    <string name="channel_description">التنبيه اليومي لأذكار الصباح والمساء</string>
+</resources>
