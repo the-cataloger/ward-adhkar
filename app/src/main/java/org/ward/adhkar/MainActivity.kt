@@ -3,6 +3,7 @@ package org.ward.adhkar
 import android.Manifest
 import android.app.TimePickerDialog
 import android.content.Intent
+import android.provider.Settings
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -56,6 +57,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.ward.adhkar.audio.WardSpeech
+import org.ward.adhkar.audio.WardSounds
 import org.ward.adhkar.data.Dhikr
 import org.ward.adhkar.data.DhikrRepository
 import org.ward.adhkar.data.Period
@@ -107,6 +110,11 @@ class MainActivity : ComponentActivity() {
 private fun WardScreen(store: WardStore, openedPeriod: String) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val voice = remember { WardSpeech(context) }
+    val sounds = remember { WardSounds() }
+    DisposableEffect(voice, sounds) {
+        onDispose { voice.release(); sounds.release() }
+    }
     val corpus = remember { DhikrRepository.load(context) }
     var periodId by rememberSaveable { mutableStateOf(openedPeriod) }
     var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -140,6 +148,9 @@ private fun WardScreen(store: WardStore, openedPeriod: String) {
     val entries = remember(period, corpus) { corpus.filter { it.belongsTo(period) } }
     val index = selectedIndex.coerceIn(0, (entries.size - 1).coerceAtLeast(0))
     val item = entries.getOrNull(index)
+    LaunchedEffect(periodId, item?.id, screen, showCatalog) {
+        if (screen != "reader" || showCatalog || voice.speaking) voice.stop()
+    }
     @Suppress("UNUSED_VARIABLE") val snapshot = version
     val completed = entries.count { store.count(period, it.id, today) >= it.target }
     val progress = completed.toFloat() / entries.size.coerceAtLeast(1)
@@ -212,6 +223,12 @@ private fun WardScreen(store: WardStore, openedPeriod: String) {
                     RecitationCard(item, period, index + 1, entries.size,
                         store.isFavorite(item.id), store.fontScale,
                         onFavorite = { store.toggleFavorite(item.id); version++ },
+                         speechReady = voice.ready, speechLoading = voice.loading,
+                         speaking = voice.speaking,
+                         onSpeech = {
+                             if (voice.speaking) voice.stop()
+                             else voice.speak(item.content(period), store.speechRate)
+                         },
                         modifier = Modifier.weight(1f))
                     Spacer(Modifier.height(8.dp))
                     Counter(
@@ -222,6 +239,7 @@ private fun WardScreen(store: WardStore, openedPeriod: String) {
                             val previous = store.count(period, item.id, today)
                             if (previous < item.target) {
                                 store.setCount(period, item.id, previous + 1, today)
+                                 if (store.countSoundEnabled) sounds.play(previous + 1 == item.target)
                                 version++
                                 if (previous + 1 == item.target && store.autoAdvance) {
                                     val next = entries.indices.firstOrNull {
@@ -329,7 +347,9 @@ private fun WardScreen(store: WardStore, openedPeriod: String) {
 @Composable
 private fun RecitationCard(
     dhikr: Dhikr, period: Period, ordinal: Int, total: Int,
-    favorite: Boolean, fontScale: Float, onFavorite: () -> Unit, modifier: Modifier
+    favorite: Boolean, fontScale: Float, onFavorite: () -> Unit,
+    speechReady: Boolean, speechLoading: Boolean, speaking: Boolean,
+    onSpeech: () -> Unit, modifier: Modifier
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -341,14 +361,14 @@ private fun RecitationCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("الذكر $ordinal من $total", color = Gold, fontSize = 12.sp,
                 modifier = Modifier.weight(1f))
-            IconButton(onClick = onFavorite, modifier = Modifier.size(37.dp)) {
+            IconButton(onClick = onFavorite, modifier = Modifier.size(48.dp)) {
                 Icon(if (favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     if (favorite) "إزالة من المفضلة" else "إضافة إلى المفضلة",
                     tint = Gold, modifier = Modifier.size(21.dp))
             }
             IconButton(onClick = {
                 clipboard.setText(AnnotatedString(dhikr.content(period) + "\nالمصدر: " + dhikr.source))
-            }, modifier = Modifier.size(37.dp)) {
+            }, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Default.ContentCopy, "نسخ الذكر", tint = Gold, modifier = Modifier.size(19.dp))
             }
             IconButton(onClick = {
@@ -358,14 +378,29 @@ private fun RecitationCard(
                     putExtra(Intent.EXTRA_TEXT, message)
                 }
                 context.startActivity(Intent.createChooser(send, "مشاركة الذكر"))
-            }, modifier = Modifier.size(37.dp)) {
+            }, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Default.Share, "مشاركة الذكر", tint = Gold, modifier = Modifier.size(19.dp))
             }
         }
         Spacer(Modifier.height(8.dp))
         Text(dhikr.title, modifier = Modifier.fillMaxWidth(), color = Gold,
             fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = onSpeech, enabled = speechReady,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Line)
+        ) {
+            Icon(if (speaking) Icons.Default.StopCircle else Icons.Default.VolumeUp, null)
+            Spacer(Modifier.width(7.dp))
+            Text(when {
+                speaking -> "إيقاف القراءة الصوتية"
+                speechLoading -> "تهيئة الصوت العربي…"
+                !speechReady -> "يلزم تثبيت صوت عربي محلي"
+                else -> "استمع للذكر"
+            }, fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(10.dp))
         HorizontalDivider(color = Line)
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll),
             horizontalAlignment = Alignment.CenterHorizontally) {
@@ -458,6 +493,8 @@ private fun SettingsScreen(store: WardStore, onBack: () -> Unit) {
     var fontScale by remember { mutableFloatStateOf(store.fontScale) }
     var haptics by remember { mutableStateOf(store.hapticsEnabled) }
     var advance by remember { mutableStateOf(store.autoAdvance) }
+    var soundEnabled by remember { mutableStateOf(store.countSoundEnabled) }
+    var speechRate by remember { mutableFloatStateOf(store.speechRate) }
     var denied by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf<Period?>(null) }
 
@@ -532,11 +569,40 @@ private fun SettingsScreen(store: WardStore, onBack: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(24.dp))
+            Text("الصوت والملاءمة", color = Gold, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(10.dp))
+            Column(Modifier.fillMaxWidth().clip(Rounded).background(Panel).padding(17.dp)) {
+                PrefSwitch("نغمة هادئة عند العدّ", soundEnabled) {
+                    soundEnabled = it; store.countSoundEnabled = it
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("سرعة القراءة الصوتية", color = Cream, fontSize = 16.sp)
+                Slider(value = speechRate, onValueChange = {
+                    speechRate = it; store.speechRate = it
+                }, valueRange = .65f..1.20f)
+                Text("سرعة النطق: ${(speechRate * 100).toInt()}٪", color = Muted, fontSize = 12.sp)
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(onClick = {
+                    val intent = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        putExtra(Settings.EXTRA_CHANNEL_ID, "ward_daily_reminders")
+                    }
+                    context.startActivity(intent)
+                }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Icon(Icons.Default.Tune, null)
+                    Spacer(Modifier.width(7.dp))
+                    Text("اختيار نغمة التذكيرات من أندرويد")
+                }
+                Spacer(Modifier.height(10.dp))
+                Text("قراءة الأذكار تعتمد على صوت عربي محلي مثبت في الهاتف. قد يخطئ النطق الآلي في التشكيل، وليس بديلًا عن قراءة شرعية معتمدة.",
+                    color = Muted, fontSize = 12.sp, lineHeight = 21.sp)
+            }
+            Spacer(Modifier.height(24.dp))
             Text("الخصوصية", color = Gold, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Text("لا يحتاج التطبيق إلى الإنترنت، ولا يجمع بيانات الاستخدام. تُحفظ الأذكار والإعدادات على جهازك.",
                 color = Muted, fontSize = 13.sp, lineHeight = 23.sp)
             Spacer(Modifier.height(18.dp))
-            Text("وِرد 1.1.0 • مجموعة مختارة تحتاج تدقيقًا علميًا نهائيًا قبل النشر العام.",
+            Text("وِرد 1.2.0 • مجموعة مختارة تحتاج تدقيقًا علميًا نهائيًا قبل النشر العام.",
                 color = Muted, fontSize = 12.sp)
             Spacer(Modifier.height(35.dp))
         }
