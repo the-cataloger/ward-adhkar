@@ -40,6 +40,14 @@ class WardStore(context: Context) {
         get() = prefs.getBoolean("haptics", true)
         set(value) { prefs.edit().putBoolean("haptics", value).apply() }
 
+    var countSoundEnabled: Boolean
+        get() = prefs.getBoolean("count_sound", false)
+        set(value) { prefs.edit().putBoolean("count_sound", value).apply() }
+
+    var speechRate: Float
+        get() = prefs.getFloat("speech_rate", .92f).coerceIn(.65f, 1.20f)
+        set(value) { prefs.edit().putFloat("speech_rate", value.coerceIn(.65f, 1.20f)).apply() }
+
     var autoAdvance: Boolean
         get() = prefs.getBoolean("auto_advance", false)
         set(value) { prefs.edit().putBoolean("auto_advance", value).apply() }
