@@ -49,8 +49,13 @@ class WardStore(context: Context) {
         set(value) { prefs.edit().putFloat("speech_rate", value.coerceIn(.65f, 1.20f)).apply() }
 
     var autoAdvance: Boolean
-        get() = prefs.getBoolean("auto_advance", false)
+        get() = prefs.getBoolean("auto_advance", true)
         set(value) { prefs.edit().putBoolean("auto_advance", value).apply() }
+
+    /** At most one extra reminder per period, one hour after the daily notification. */
+    var followUpEnabled: Boolean
+        get() = prefs.getBoolean("reminder_follow_up", true)
+        set(value) { prefs.edit().putBoolean("reminder_follow_up", value).apply() }
 
     fun isReminderEnabled(period: Period): Boolean = prefs.getBoolean("enabled_${period.id}", false)
     fun setReminderEnabled(period: Period, value: Boolean) {
