@@ -14,6 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,9 +34,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -49,8 +52,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.layout.ContentScale
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -62,15 +67,16 @@ import org.ward.adhkar.data.DhikrRepository
 import org.ward.adhkar.data.Period
 import org.ward.adhkar.data.WardStore
 import org.ward.adhkar.data.WardNavigation
+import org.ward.adhkar.ui.WardOrnament
 import org.ward.adhkar.notifications.ReminderScheduler
 import java.time.LocalDate
 import java.time.LocalTime
 
-private val Night = Color(0xFF071510)
-private val Panel = Color(0xFF10241C)
-private val Raised = Color(0xFF19372B)
-private val Gold = Color(0xFFE3C17E)
-private val Cream = Color(0xFFF2EEE2)
+private val Night = Color(0xFF08130F)
+private val Panel = Color(0xFF11241C)
+private val Raised = Color(0xFF284336)
+private val Gold = Color(0xFFDAB67A)
+private val Cream = Color(0xFFF5EEDA)
 private val Muted = Color(0xFFAAC0B2)
 private val Line = Color(0xFF2C4A3B)
 private val Success = Color(0xFF96D4A6)
@@ -164,171 +170,213 @@ private fun WardScreen(store: WardStore, openedPeriod: String, openSerial: Int) 
         if (showCatalog) showCatalog = false else screen = "reader"
     }
 
-    Column(Modifier.fillMaxSize().background(
-        Brush.verticalGradient(listOf(Night, Color(0xFF0B1D17), Night))
-    ).statusBarsPadding().navigationBarsPadding().padding(horizontal = 18.dp)) {
-        when (screen) {
-            "settings" -> SettingsScreen(store) { screen = "reader"; version++ }
-            "stats" -> StatisticsScreen(store, corpus, today) { screen = "reader" }
-            else -> {
-                Row(Modifier.fillMaxWidth().height(75.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(53.dp).clip(CircleShape).background(Raised)
-                        .border(1.dp, Gold.copy(alpha = .6f), CircleShape),
-                        contentAlignment = Alignment.Center) {
-                        Text("۞", fontSize = 35.sp, color = Gold)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("وِرد", color = Gold, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                        Text("لحظات من السكينة كل يوم", color = Muted, fontSize = 12.sp)
-                    }
-                    IconButton(onClick = { screen = "stats" }) {
-                        Icon(Icons.Default.Insights, "الإحصاءات", tint = Gold)
-                    }
-                    IconButton(onClick = { screen = "settings" }) {
-                        Icon(Icons.Default.Settings, "الإعدادات", tint = Gold)
-                    }
-                }
+    val wallpaper = remember { WardOrnament.load() }
 
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(17.dp))
-                    .background(Panel).padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Period.entries.forEach { candidate ->
-                        val active = period == candidate
-                        Box(Modifier.weight(1f).height(47.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (active) Gold else Color.Transparent)
-                            .clickable {
-                                periodId = candidate.id
-                                selectedIndex = WardNavigation.firstUnfinished(
-                                    corpus.filter { it.belongsTo(candidate) }
-                                ) { store.count(candidate, it.id, today) >= it.target } ?: 0
-                            }, contentAlignment = Alignment.Center) {
-                            Text((if (candidate == Period.MORNING) "☀ " else "☾ ") +
-                                "أذكار ${candidate.label}", color = if (active) Night else Muted,
-                                fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
-                    .background(Panel).border(1.dp, Line, RoundedCornerShape(18.dp))
-                    .padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("إنجاز وِرد ${period.label}", color = Cream, fontSize = 14.sp,
-                            modifier = Modifier.weight(1f))
-                        Text("$completed / ${entries.size}", color = Gold, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.height(9.dp))
-                    LinearProgressIndicator(progress = { progress },
-                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
-                        color = Gold, trackColor = Line)
-                }
-                Spacer(Modifier.height(12.dp))
-                if (!store.isReminderEnabled(period) || !ReminderScheduler.hasPermission(context)) {
+    Box(Modifier.fillMaxSize().background(Night)) {
+        if (wallpaper != null) {
+            Image(
+                bitmap = wallpaper,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+                alpha = 0.82f
+            )
+        }
+        // A permanent scrim makes the verse readable over the supplied ornament.
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    listOf(
+                        Night.copy(alpha = .56f),
+                        Night.copy(alpha = .78f),
+                        Night.copy(alpha = .84f),
+                        Night.copy(alpha = .73f)
+                    )
+                )
+            )
+        )
+        Column(
+            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
+                .padding(horizontal = 14.dp, vertical = 5.dp)
+        ) {
+            when (screen) {
+                "settings" -> SettingsScreen(store) { screen = "reader"; version++ }
+                "stats" -> StatisticsScreen(store, corpus, today) { screen = "reader" }
+                else -> {
                     Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-                            .background(Raised).padding(start = 12.dp, end = 5.dp, top = 5.dp, bottom = 5.dp),
+                        Modifier.fillMaxWidth().height(54.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.NotificationsActive, null, tint = Gold)
-                        Spacer(Modifier.width(9.dp))
-                        Text(
-                            "فعّل تنبيهات أذكار ${period.label} حتى لا يفوتك وِردك",
-                            color = Cream, fontSize = 12.sp, lineHeight = 20.sp,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = { screen = "settings" }) {
-                            Text("ضبط", color = Gold, fontWeight = FontWeight.Bold)
+                        Box(
+                            Modifier.size(42.dp).clip(CircleShape)
+                                .background(Brush.radialGradient(listOf(Raised, Panel)))
+                                .border(1.5.dp, Gold, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) { Text("۞", color = Gold, fontSize = 27.sp) }
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("وِرد", color = Gold, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                            Text("أذكارك اليومية", color = Cream, fontSize = 11.sp)
+                        }
+                        CircularIcon(Icons.Default.Insights, "الإحصاءات") { screen = "stats" }
+                        Spacer(Modifier.width(8.dp))
+                        CircularIcon(Icons.Default.Settings, "الإعدادات") { screen = "settings" }
+                    }
+
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(25.dp))
+                            .background(Panel.copy(alpha = .90f))
+                            .border(1.dp, Gold.copy(alpha = .40f), RoundedCornerShape(25.dp))
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Period.entries.forEach { candidate ->
+                            val active = period == candidate
+                            Box(
+                                Modifier.weight(1f).height(42.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (active) Brush.horizontalGradient(
+                                            listOf(Color(0xFFF0D29B), Gold)
+                                        ) else Brush.horizontalGradient(
+                                            listOf(Color.Transparent, Color.Transparent)
+                                        )
+                                    )
+                                    .clickable {
+                                        periodId = candidate.id
+                                        selectedIndex = WardNavigation.firstUnfinished(
+                                            corpus.filter { it.belongsTo(candidate) }
+                                        ) { store.count(candidate, it.id, today) >= it.target } ?: 0
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    (if (candidate == Period.MORNING) "☀ " else "☾ ") +
+                                        "أذكار ${candidate.label}",
+                                    color = if (active) Night else Cream,
+                                    fontSize = 13.sp, fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                     Spacer(Modifier.height(9.dp))
-                }
-                if (item != null) {
-                    RecitationCard(item, period, index + 1, entries.size,
-                        store.isFavorite(item.id), store.fontScale,
-                        onFavorite = { store.toggleFavorite(item.id); version++ },
-                         speechReady = voice.ready, speechLoading = voice.loading,
-                         speaking = voice.speaking,
-                         onSpeech = {
-                             if (voice.speaking) voice.stop()
-                             else voice.speak(item.content(period), store.speechRate)
-                         },
-                        modifier = Modifier.weight(1f))
-                    Spacer(Modifier.height(8.dp))
-                    Counter(
-                        count = store.count(period, item.id, today),
-                        target = item.target,
-                        hapticsEnabled = store.hapticsEnabled,
-                        onIncrement = {
-                            val previous = store.count(period, item.id, today)
-                            if (previous < item.target) {
-                                store.setCount(period, item.id, previous + 1, today)
-                                 if (store.countSoundEnabled) sounds.play(previous + 1 == item.target)
-                                version++
-                                if (previous + 1 == item.target) {
-                                    val next = WardNavigation.nextUnfinished(entries, index) {
-                                        store.count(period, it.id, today) >= it.target
-                                    }
-                                    if (next != null && store.autoAdvance) selectedIndex = next
-                                    if (next == null) {
-                                        ReminderScheduler.cancelPending(context, period)
-                                        ReminderScheduler.dismiss(context, period)
+
+                    if (item != null) {
+                        RecitationCard(
+                            item, period, index + 1, entries.size,
+                            store.isFavorite(item.id), store.fontScale,
+                            onFavorite = { store.toggleFavorite(item.id); version++ },
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.height(7.dp))
+
+                        // The counter remains the largest interactive target, in the center.
+                        Row(
+                            Modifier.fillMaxWidth().height(142.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OrnateNavButton(
+                                Icons.Default.ChevronLeft, "التالي",
+                                enabled = index < entries.lastIndex
+                            ) { selectedIndex = (index + 1).coerceAtMost(entries.lastIndex) }
+                            Counter(
+                                count = store.count(period, item.id, today),
+                                target = item.target,
+                                hapticsEnabled = store.hapticsEnabled,
+                                onIncrement = {
+                                    val previous = store.count(period, item.id, today)
+                                    if (previous < item.target) {
+                                        store.setCount(period, item.id, previous + 1, today)
+                                        if (store.countSoundEnabled) {
+                                            sounds.play(previous + 1 == item.target)
+                                        }
+                                        version++
+                                        if (previous + 1 == item.target) {
+                                            val next = WardNavigation.nextUnfinished(entries, index) {
+                                                store.count(period, it.id, today) >= it.target
+                                            }
+                                            if (next != null && store.autoAdvance) selectedIndex = next
+                                            if (next == null) {
+                                                ReminderScheduler.cancelPending(context, period)
+                                                ReminderScheduler.dismiss(context, period)
+                                            }
+                                        }
                                     }
                                 }
+                            )
+                            OrnateNavButton(
+                                Icons.Default.ChevronRight, "السابق",
+                                enabled = index > 0
+                            ) { selectedIndex = (index - 1).coerceAtLeast(0) }
+                        }
+
+                        // Everything secondary is placed beneath the reading and counting area.
+                        Spacer(Modifier.height(2.dp))
+                        Row(
+                            Modifier.fillMaxWidth().height(72.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            QuickCircle(Icons.Default.Settings, "الضبط") { screen = "settings" }
+                            QuickCircle(Icons.Default.FormatListBulleted, "الأذكار") {
+                                showCatalog = true
                             }
-                        },
-                        onUndo = {
-                            val previous = store.count(period, item.id, today)
-                            if (previous > 0) {
-                                store.setCount(period, item.id, previous - 1, today)
-                                version++
+                            QuickCircle(
+                                Icons.Default.Undo, "تراجع",
+                                enabled = store.count(period, item.id, today) > 0
+                            ) {
+                                val old = store.count(period, item.id, today)
+                                if (old > 0) {
+                                    store.setCount(period, item.id, old - 1, today)
+                                    version++
+                                }
+                            }
+                            QuickCircle(
+                                if (voice.speaking) Icons.Default.StopCircle
+                                else Icons.Default.VolumeUp,
+                                if (voice.speaking) "إيقاف" else "استماع",
+                                enabled = voice.ready
+                            ) {
+                                if (voice.speaking) voice.stop()
+                                else voice.speak(item.content(period), store.speechRate)
+                            }
+                            QuickCircle(Icons.Default.NotificationsActive, "التذكير") {
+                                screen = "settings"
                             }
                         }
-                    )
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    } else {
+                        Spacer(Modifier.weight(1f))
+                        Text("لا توجد أذكار في هذه الفترة", color = Cream)
+                        Spacer(Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(5.dp))
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Panel.copy(alpha = .92f))
+                            .border(1.dp, Gold.copy(alpha = .45f), RoundedCornerShape(20.dp))
+                            .padding(horizontal = 13.dp, vertical = 9.dp)
                     ) {
-                        OutlinedButton(
-                            onClick = { selectedIndex = (index - 1).coerceAtLeast(0) },
-                            enabled = index > 0,
-                            modifier = Modifier.weight(1f).heightIn(min = 60.dp),
-                            shape = RoundedCornerShape(18.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Gold)
-                        ) {
-                            Icon(Icons.Default.ChevronRight, null, modifier = Modifier.size(25.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("السابق", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        }
-                        OutlinedIconButton(
-                            onClick = { showCatalog = true },
-                            modifier = Modifier.size(60.dp),
-                            shape = RoundedCornerShape(18.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Line)
-                        ) {
-                            Icon(
-                                Icons.Default.FormatListBulleted,
-                                contentDescription = "عرض جميع الأذكار",
-                                tint = Gold, modifier = Modifier.size(26.dp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "إنجاز وِرد ${period.label}",
+                                color = Cream, fontSize = 12.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                "$completed / ${entries.size}",
+                                color = Gold, fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
-                        Button(
-                            onClick = { selectedIndex = (index + 1).coerceAtMost(entries.lastIndex) },
-                            enabled = index < entries.lastIndex,
-                            modifier = Modifier.weight(1f).heightIn(min = 60.dp),
-                            shape = RoundedCornerShape(18.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp)
-                        ) {
-                            Text("التالي", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.width(4.dp))
-                            Icon(Icons.Default.ChevronLeft, null, modifier = Modifier.size(25.dp))
-                        }
+                        Spacer(Modifier.height(6.dp))
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
+                            color = Gold, trackColor = Line
+                        )
                     }
-                    Spacer(Modifier.height(8.dp))
                 }
             }
         }
@@ -400,141 +448,250 @@ private fun WardScreen(store: WardStore, openedPeriod: String, openSerial: Int) 
 }
 
 @Composable
+private fun CircularIcon(icon: ImageVector, description: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(40.dp)
+            .shadow(4.dp, CircleShape)
+            .clip(CircleShape)
+            .background(Brush.radialGradient(listOf(Raised, Panel)))
+            .border(1.dp, Gold.copy(alpha = .70f), CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = description, tint = Gold, modifier = Modifier.size(21.dp))
+    }
+}
+
+@Composable
+private fun OrnateNavButton(
+    icon: ImageVector, title: String, enabled: Boolean, onClick: () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier.size(76.dp)
+                .shadow(8.dp, CircleShape, ambientColor = Gold.copy(alpha = .25f))
+                .clip(CircleShape)
+                .background(
+                    Brush.linearGradient(
+                        if (enabled) listOf(Color(0xFF3C5A43), Color(0xFF10251E))
+                        else listOf(Panel, Night)
+                    )
+                )
+                .border(2.dp, Gold.copy(alpha = if (enabled) .92f else .26f), CircleShape)
+                .clickable(enabled = enabled, onClick = onClick)
+                .semantics { contentDescription = title },
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    icon, null,
+                    tint = if (enabled) Gold else Muted.copy(alpha = .45f),
+                    modifier = Modifier.size(33.dp)
+                )
+                Text(
+                    title, color = if (enabled) Cream else Muted.copy(alpha = .45f),
+                    fontWeight = FontWeight.Bold, fontSize = 11.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickCircle(
+    icon: ImageVector, title: String, enabled: Boolean = true, onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.width(62.dp)
+    ) {
+        Box(
+            Modifier.size(48.dp)
+                .shadow(5.dp, CircleShape)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        if (enabled) listOf(Raised, Panel)
+                        else listOf(Panel, Night)
+                    )
+                )
+                .border(1.5.dp, Gold.copy(alpha = if (enabled) .8f else .28f), CircleShape)
+                .clickable(enabled = enabled, onClick = onClick)
+                .semantics { contentDescription = title },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                icon, null, modifier = Modifier.size(23.dp),
+                tint = if (enabled) Gold else Muted.copy(alpha = .45f)
+            )
+        }
+        Spacer(Modifier.height(3.dp))
+        Text(
+            title, color = if (enabled) Cream else Muted.copy(alpha = .45f),
+            fontSize = 10.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
 private fun RecitationCard(
     dhikr: Dhikr, period: Period, ordinal: Int, total: Int,
     favorite: Boolean, fontScale: Float, onFavorite: () -> Unit,
-    speechReady: Boolean, speechLoading: Boolean, speaking: Boolean,
-    onSpeech: () -> Unit, modifier: Modifier
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val scroll = rememberScrollState()
     LaunchedEffect(dhikr.id, period) { scroll.scrollTo(0) }
-    Column(modifier.fillMaxWidth().clip(Rounded)
-        .background(Brush.verticalGradient(listOf(Raised, Panel)))
-        .border(1.dp, Gold.copy(alpha = .2f), Rounded).padding(17.dp)) {
+
+    Column(
+        modifier.fillMaxWidth()
+            .shadow(12.dp, RoundedCornerShape(28.dp), ambientColor = Gold.copy(alpha = .3f))
+            .clip(RoundedCornerShape(28.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xF0102B20), Color(0xF0081A13))
+                )
+            )
+            .border(1.5.dp, Gold.copy(alpha = .85f), RoundedCornerShape(28.dp))
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("الذكر $ordinal من $total", color = Gold, fontSize = 12.sp,
-                modifier = Modifier.weight(1f))
-            IconButton(onClick = onFavorite, modifier = Modifier.size(48.dp)) {
-                Icon(if (favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    if (favorite) "إزالة من المفضلة" else "إضافة إلى المفضلة",
-                    tint = Gold, modifier = Modifier.size(21.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    dhikr.title, color = Gold, fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold, maxLines = 1
+                )
+                Text("الذكر $ordinal من $total", color = Muted, fontSize = 11.sp)
             }
-            IconButton(onClick = {
+            CircularIcon(
+                if (favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                if (favorite) "إزالة من المفضلة" else "إضافة إلى المفضلة", onFavorite
+            )
+            Spacer(Modifier.width(6.dp))
+            CircularIcon(Icons.Default.ContentCopy, "نسخ الذكر") {
                 clipboard.setText(AnnotatedString(dhikr.content(period) + "\nالمصدر: " + dhikr.source))
-            }, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.Default.ContentCopy, "نسخ الذكر", tint = Gold, modifier = Modifier.size(19.dp))
             }
-            IconButton(onClick = {
-                val message = dhikr.content(period) + "\n\nالمصدر: " + dhikr.source + "\nمن تطبيق وِرد"
+            Spacer(Modifier.width(6.dp))
+            CircularIcon(Icons.Default.Share, "مشاركة الذكر") {
+                val message = dhikr.content(period) + "\n\nالمصدر: " + dhikr.source +
+                    "\nمن تطبيق وِرد"
                 val send = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
                     putExtra(Intent.EXTRA_TEXT, message)
                 }
                 context.startActivity(Intent.createChooser(send, "مشاركة الذكر"))
-            }, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.Default.Share, "مشاركة الذكر", tint = Gold, modifier = Modifier.size(19.dp))
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(dhikr.title, modifier = Modifier.fillMaxWidth(), color = Gold,
-            fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = onSpeech, enabled = speechReady,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Line)
+        Spacer(Modifier.height(5.dp))
+        HorizontalDivider(color = Gold.copy(alpha = .28f))
+        Column(
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Icon(if (speaking) Icons.Default.StopCircle else Icons.Default.VolumeUp, null)
-            Spacer(Modifier.width(7.dp))
-            Text(when {
-                speaking -> "إيقاف القراءة الصوتية"
-                speechLoading -> "تهيئة الصوت العربي…"
-                !speechReady -> "يلزم تثبيت صوت عربي محلي"
-                else -> "استمع للذكر"
-            }, fontSize = 13.sp)
-        }
-        Spacer(Modifier.height(10.dp))
-        HorizontalDivider(color = Line)
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll),
-            horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(11.dp))
             SelectionContainer {
-                Text(dhikr.content(period), color = Cream, fontFamily = FontFamily.Serif,
-                    fontSize = (22 * fontScale).sp, lineHeight = (38 * fontScale).sp,
-                    textAlign = TextAlign.Center)
+                Text(
+                    dhikr.content(period),
+                    color = Cream,
+                    fontFamily = FontFamily.Serif,
+                    fontSize = (22 * fontScale).sp,
+                    lineHeight = (38 * fontScale).sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
-            Spacer(Modifier.height(20.dp))
-            Text("المصدر: ${dhikr.source}", color = Muted, fontSize = 12.sp,
-                lineHeight = 20.sp, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(11.dp))
             if (dhikr.note.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                Text(dhikr.note, color = Muted, fontSize = 12.sp,
-                    lineHeight = 20.sp, textAlign = TextAlign.Center)
+                Text(
+                    dhikr.note, color = Muted, fontSize = 12.sp,
+                    textAlign = TextAlign.Center, lineHeight = 19.sp
+                )
             }
-            Spacer(Modifier.height(12.dp))
         }
+        HorizontalDivider(color = Gold.copy(alpha = .28f))
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "المصدر: ${dhikr.source}",
+            color = Gold.copy(alpha = .92f), fontSize = 12.sp,
+            lineHeight = 18.sp, textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(), maxLines = 2
+        )
     }
 }
 
 @Composable
 private fun Counter(
     count: Int, target: Int, hapticsEnabled: Boolean,
-    onIncrement: () -> Unit, onUndo: () -> Unit
+    onIncrement: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
     val done = count >= target
-    val ratio by animateFloatAsState((count.toFloat() / target.coerceAtLeast(1)).coerceIn(0f,1f),
-        label = "counter_progress")
-    Row(Modifier.fillMaxWidth().height(154.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center) {
-        TextButton(onClick = onUndo, enabled = count > 0,
-            modifier = Modifier.width(80.dp)) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.Undo, null)
-                Text("تراجع", fontSize = 12.sp)
-            }
-        }
-        Box(Modifier.size(148.dp).clip(CircleShape)
-            .background(if (done) Raised else Gold)
+    val remaining = (target - count).coerceAtLeast(0)
+    val ratio by animateFloatAsState(
+        (count.toFloat() / target.coerceAtLeast(1)).coerceIn(0f, 1f),
+        label = "counter_progress"
+    )
+    Box(
+        Modifier.size(142.dp)
+            .shadow(12.dp, CircleShape, ambientColor = Gold.copy(alpha = .30f))
+            .clip(CircleShape)
+            .background(
+                Brush.radialGradient(
+                    listOf(Color(0xFF345543), Color(0xFF11271E), Color(0xFF071611))
+                )
+            )
+            .border(5.dp, Gold, CircleShape)
             .clickable(enabled = !done) {
                 if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 onIncrement()
-            }.semantics {
-                contentDescription = if (done) "اكتمل الذكر"
-                    else "العدّاد؛ $count من $target، اضغط مرة لكل تكرار"
-            }, contentAlignment = Alignment.Center) {
-            Canvas(Modifier.fillMaxSize()) {
-                val w = 5.dp.toPx()
-                val inset = 6.dp.toPx()
-                val diameter = size.minDimension - 2 * inset
-                drawArc(color = if (done) Success else Night.copy(alpha = .2f),
-                    startAngle = -90f, sweepAngle = 360f,
-                    useCenter = false, topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
-                    size = androidx.compose.ui.geometry.Size(diameter, diameter),
-                    style = Stroke(width = w, cap = StrokeCap.Round))
-                drawArc(color = if (done) Gold else Night,
-                    startAngle = -90f, sweepAngle = ratio * 360f, useCenter = false,
-                    topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
-                    size = androidx.compose.ui.geometry.Size(diameter, diameter),
-                    style = Stroke(width = w, cap = StrokeCap.Round))
             }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (done) {
-                    Icon(Icons.Default.Check, null, tint = Gold, modifier = Modifier.size(30.dp))
-                    Text("اكتمل الذكر", color = Gold, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                } else {
-                    Text("${target - count}", color = Night, fontSize = 42.sp,
-                        fontWeight = FontWeight.Bold, lineHeight = 48.sp)
-                    Text("اضغط للعدّ", color = Night, fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold)
-                    Text("$count من $target", color = Night.copy(alpha = .7f), fontSize = 11.sp)
-                }
+            .semantics {
+                contentDescription = if (done) "اكتمل الذكر"
+                    else "العدّاد: $count من $target؛ اضغط مرة لكل تكرار"
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val inset = 7.dp.toPx()
+            val diameter = size.minDimension - 2 * inset
+            drawArc(
+                color = Gold.copy(alpha = .18f),
+                startAngle = -90f, sweepAngle = 360f, useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
+                size = androidx.compose.ui.geometry.Size(diameter, diameter),
+                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+            )
+            drawArc(
+                color = Success,
+                startAngle = -90f, sweepAngle = ratio * 360f, useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
+                size = androidx.compose.ui.geometry.Size(diameter, diameter),
+                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (done) {
+                Icon(
+                    Icons.Default.Check, null, tint = Gold,
+                    modifier = Modifier.size(32.dp)
+                )
+                Text("اكتمل الذكر", color = Cream, fontSize = 13.sp)
+            } else {
+                Text(
+                    "$remaining",
+                    color = Cream, fontSize = 47.sp,
+                    lineHeight = 48.sp, fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "اضغط للعدّ",
+                    color = Gold, fontWeight = FontWeight.Bold, fontSize = 14.sp
+                )
+                Text("$count من $target", color = Muted, fontSize = 11.sp)
             }
         }
-        Spacer(Modifier.width(80.dp))
     }
 }
 
@@ -690,7 +847,7 @@ private fun SettingsScreen(store: WardStore, onBack: () -> Unit) {
             Text("لا يحتاج التطبيق إلى الإنترنت، ولا يجمع بيانات الاستخدام. تُحفظ الأذكار والإعدادات على جهازك.",
                 color = Muted, fontSize = 13.sp, lineHeight = 23.sp)
             Spacer(Modifier.height(18.dp))
-            Text("وِرد 1.3.0 • مجموعة مختارة تحتاج تدقيقًا علميًا نهائيًا قبل النشر العام.",
+            Text("وِرد 1.4.0 • مجموعة مختارة تحتاج تدقيقًا علميًا نهائيًا قبل النشر العام.",
                 color = Muted, fontSize = 12.sp)
             Spacer(Modifier.height(35.dp))
         }
