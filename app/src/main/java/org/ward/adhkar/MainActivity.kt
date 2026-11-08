@@ -55,14 +55,13 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import org.ward.adhkar.audio.WardSpeech
 import org.ward.adhkar.audio.WardSounds
 import org.ward.adhkar.data.Dhikr
 import org.ward.adhkar.data.DhikrRepository
 import org.ward.adhkar.data.Period
 import org.ward.adhkar.data.WardStore
+import org.ward.adhkar.data.WardNavigation
 import org.ward.adhkar.notifications.ReminderScheduler
 import java.time.LocalDate
 import java.time.LocalTime
@@ -79,6 +78,7 @@ private val Rounded = RoundedCornerShape(24.dp)
 
 class MainActivity : ComponentActivity() {
     private var openedPeriod by mutableStateOf("morning")
+    private var openSerial by mutableIntStateOf(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -92,7 +92,7 @@ class MainActivity : ComponentActivity() {
                     primary = Gold, onPrimary = Night, background = Night,
                     onBackground = Cream, surface = Panel, onSurface = Cream, secondary = Success
                 )) {
-                    WardScreen(store, openedPeriod)
+                    WardScreen(store, openedPeriod, openSerial)
                 }
             }
         }
@@ -101,15 +101,17 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent.getStringExtra("open_period")?.let { openedPeriod = it }
+        intent.getStringExtra("open_period")?.let {
+            openedPeriod = it
+            openSerial++
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WardScreen(store: WardStore, openedPeriod: String) {
+private fun WardScreen(store: WardStore, openedPeriod: String, openSerial: Int) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val voice = remember { WardSpeech(context) }
     val sounds = remember { WardSounds() }
     DisposableEffect(voice, sounds) {
@@ -136,12 +138,15 @@ private fun WardScreen(store: WardStore, openedPeriod: String) {
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(openedPeriod) {
-        if (periodId != openedPeriod) {
-            periodId = openedPeriod
-            selectedIndex = 0
-            screen = "reader"
-        }
+    LaunchedEffect(openedPeriod, openSerial) {
+        // Tapping a reminder opens the first incomplete dhikr, including onNewIntent.
+        val requested = Period.fromId(openedPeriod)
+        periodId = requested.id
+        selectedIndex = WardNavigation.firstUnfinished(
+            corpus.filter { it.belongsTo(requested) }
+        ) { store.count(requested, it.id, LocalDate.now()) >= it.target } ?: 0
+        screen = "reader"
+        showCatalog = false
     }
 
     val period = Period.fromId(periodId)
@@ -196,7 +201,9 @@ private fun WardScreen(store: WardStore, openedPeriod: String) {
                             .background(if (active) Gold else Color.Transparent)
                             .clickable {
                                 periodId = candidate.id
-                                selectedIndex = 0
+                                selectedIndex = WardNavigation.firstUnfinished(
+                                    corpus.filter { it.belongsTo(candidate) }
+                                ) { store.count(candidate, it.id, today) >= it.target } ?: 0
                             }, contentAlignment = Alignment.Center) {
                             Text((if (candidate == Period.MORNING) "☀ " else "☾ ") +
                                 "أذكار ${candidate.label}", color = if (active) Night else Muted,
@@ -219,6 +226,25 @@ private fun WardScreen(store: WardStore, openedPeriod: String) {
                         color = Gold, trackColor = Line)
                 }
                 Spacer(Modifier.height(12.dp))
+                if (!store.isReminderEnabled(period) || !ReminderScheduler.hasPermission(context)) {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                            .background(Raised).padding(start = 12.dp, end = 5.dp, top = 5.dp, bottom = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.NotificationsActive, null, tint = Gold)
+                        Spacer(Modifier.width(9.dp))
+                        Text(
+                            "فعّل تنبيهات أذكار ${period.label} حتى لا يفوتك وِردك",
+                            color = Cream, fontSize = 12.sp, lineHeight = 20.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { screen = "settings" }) {
+                            Text("ضبط", color = Gold, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(Modifier.height(9.dp))
+                }
                 if (item != null) {
                     RecitationCard(item, period, index + 1, entries.size,
                         store.isFavorite(item.id), store.fontScale,
@@ -241,13 +267,14 @@ private fun WardScreen(store: WardStore, openedPeriod: String) {
                                 store.setCount(period, item.id, previous + 1, today)
                                  if (store.countSoundEnabled) sounds.play(previous + 1 == item.target)
                                 version++
-                                if (previous + 1 == item.target && store.autoAdvance) {
-                                    val next = entries.indices.firstOrNull {
-                                        it > index && store.count(period, entries[it].id, today) < entries[it].target
+                                if (previous + 1 == item.target) {
+                                    val next = WardNavigation.nextUnfinished(entries, index) {
+                                        store.count(period, it.id, today) >= it.target
                                     }
-                                    if (next != null) scope.launch {
-                                        delay(650)
-                                        selectedIndex = next
+                                    if (next != null && store.autoAdvance) selectedIndex = next
+                                    if (next == null) {
+                                        ReminderScheduler.cancelPending(context, period)
+                                        ReminderScheduler.dismiss(context, period)
                                     }
                                 }
                             }
@@ -260,18 +287,46 @@ private fun WardScreen(store: WardStore, openedPeriod: String) {
                             }
                         }
                     )
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween) {
-                        TextButton(onClick = { selectedIndex = (index - 1).coerceAtLeast(0) },
-                            enabled = index > 0) { Text("❮ السابق") }
-                        OutlinedButton(onClick = { showCatalog = true },
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Line)) {
-                            Icon(Icons.Default.FormatListBulleted, null, modifier = Modifier.size(17.dp))
-                            Spacer(Modifier.width(5.dp))
-                            Text("كل الأذكار", fontSize = 13.sp)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { selectedIndex = (index - 1).coerceAtLeast(0) },
+                            enabled = index > 0,
+                            modifier = Modifier.weight(1f).heightIn(min = 60.dp),
+                            shape = RoundedCornerShape(18.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Gold)
+                        ) {
+                            Icon(Icons.Default.ChevronRight, null, modifier = Modifier.size(25.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("السابق", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         }
-                        TextButton(onClick = { selectedIndex = (index + 1).coerceAtMost(entries.lastIndex) },
-                            enabled = index < entries.lastIndex) { Text("التالي ❯") }
+                        OutlinedIconButton(
+                            onClick = { showCatalog = true },
+                            modifier = Modifier.size(60.dp),
+                            shape = RoundedCornerShape(18.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Line)
+                        ) {
+                            Icon(
+                                Icons.Default.FormatListBulleted,
+                                contentDescription = "عرض جميع الأذكار",
+                                tint = Gold, modifier = Modifier.size(26.dp)
+                            )
+                        }
+                        Button(
+                            onClick = { selectedIndex = (index + 1).coerceAtMost(entries.lastIndex) },
+                            enabled = index < entries.lastIndex,
+                            modifier = Modifier.weight(1f).heightIn(min = 60.dp),
+                            shape = RoundedCornerShape(18.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Text("التالي", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.width(4.dp))
+                            Icon(Icons.Default.ChevronLeft, null, modifier = Modifier.size(25.dp))
+                        }
                     }
                     Spacer(Modifier.height(8.dp))
                 }
@@ -490,6 +545,8 @@ private fun SettingsScreen(store: WardStore, onBack: () -> Unit) {
     var eveningEnabled by remember { mutableStateOf(store.isReminderEnabled(Period.EVENING)) }
     var morningTime by remember { mutableStateOf(store.reminderTime(Period.MORNING)) }
     var eveningTime by remember { mutableStateOf(store.reminderTime(Period.EVENING)) }
+    var followUp by remember { mutableStateOf(store.followUpEnabled) }
+    var reminderTestMessage by remember { mutableStateOf<String?>(null) }
     var fontScale by remember { mutableFloatStateOf(store.fontScale) }
     var haptics by remember { mutableStateOf(store.hapticsEnabled) }
     var advance by remember { mutableStateOf(store.autoAdvance) }
@@ -546,6 +603,37 @@ private fun SettingsScreen(store: WardStore, onBack: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             ReminderCard("☾", "أذكار المساء", eveningEnabled, eveningTime,
                 { toggle(Period.EVENING, it) }, { pickTime(Period.EVENING) })
+            Spacer(Modifier.height(10.dp))
+            Column(Modifier.fillMaxWidth().clip(Rounded).background(Panel).padding(14.dp)) {
+                PrefSwitch("تذكير إضافي بعد ساعة إذا لم يكتمل الورد", followUp) {
+                    followUp = it
+                    store.followUpEnabled = it
+                    if (!it) ReminderScheduler.cancelFollowUps(context)
+                }
+                OutlinedButton(
+                    onClick = {
+                        if (!ReminderScheduler.hasPermission(context)) {
+                            denied = true
+                            reminderTestMessage = null
+                        } else {
+                            val chosen = if (morningEnabled) Period.MORNING else Period.EVENING
+                            val shown = ReminderScheduler.show(context, chosen)
+                            reminderTestMessage = if (shown) "أُرسل إشعار تجريبي إلى هاتفك."
+                                else "وِرد هذه الفترة مكتمل اليوم؛ لا حاجة إلى تنبيه."
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Line)
+                ) {
+                    Icon(Icons.Default.NotificationsActive, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("جرّب إشعار التذكير")
+                }
+                reminderTestMessage?.let { message ->
+                    Text(message, color = Success, fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 8.dp))
+                }
+            }
             if (denied) Text("يُرجى السماح بالإشعارات من إعدادات الهاتف.",
                 color = Gold, fontSize = 13.sp, modifier = Modifier.padding(vertical = 10.dp))
             Spacer(Modifier.height(25.dp))
@@ -602,7 +690,7 @@ private fun SettingsScreen(store: WardStore, onBack: () -> Unit) {
             Text("لا يحتاج التطبيق إلى الإنترنت، ولا يجمع بيانات الاستخدام. تُحفظ الأذكار والإعدادات على جهازك.",
                 color = Muted, fontSize = 13.sp, lineHeight = 23.sp)
             Spacer(Modifier.height(18.dp))
-            Text("وِرد 1.2.0 • مجموعة مختارة تحتاج تدقيقًا علميًا نهائيًا قبل النشر العام.",
+            Text("وِرد 1.3.0 • مجموعة مختارة تحتاج تدقيقًا علميًا نهائيًا قبل النشر العام.",
                 color = Muted, fontSize = 12.sp)
             Spacer(Modifier.height(35.dp))
         }
