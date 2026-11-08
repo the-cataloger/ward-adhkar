@@ -170,7 +170,7 @@ private fun WardScreen(store: WardStore, openedPeriod: String, openSerial: Int) 
         if (showCatalog) showCatalog = false else screen = "reader"
     }
 
-    val wallpaper = remember { WardOrnament.load() }
+    val wallpaper = remember { WardOrnament.load(context) }
 
     Box(Modifier.fillMaxSize().background(Night)) {
         if (wallpaper != null) {
