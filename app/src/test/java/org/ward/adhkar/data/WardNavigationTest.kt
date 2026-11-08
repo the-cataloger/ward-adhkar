@@ -30,3 +30,4 @@ class WardNavigationTest {
         assertNull(WardNavigation.nextUnfinished(listOf(entry("x")), 0) { false })
         assertNull(WardNavigation.nextUnfinished(entries, -1) { false })
     }
+}
