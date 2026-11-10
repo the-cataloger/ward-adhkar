@@ -68,6 +68,8 @@ import org.ward.adhkar.data.Period
 import org.ward.adhkar.data.WardStore
 import org.ward.adhkar.data.WardNavigation
 import org.ward.adhkar.ui.WardOrnament
+import org.ward.adhkar.ui.ThumbRecitationCard
+import kotlinx.coroutines.delay
 import org.ward.adhkar.notifications.ReminderScheduler
 import java.time.LocalDate
 import java.time.LocalTime
@@ -132,6 +134,7 @@ private fun WardScreen(store: WardStore, openedPeriod: String, openSerial: Int) 
     var favoritesOnly by rememberSaveable { mutableStateOf(false) }
     var today by remember { mutableStateOf(LocalDate.now()) }
     var version by remember { mutableIntStateOf(0) }
+    var pendingAdvanceId by remember { mutableStateOf<String?>(null) }
 
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner) {
@@ -165,6 +168,18 @@ private fun WardScreen(store: WardStore, openedPeriod: String, openSerial: Int) 
     @Suppress("UNUSED_VARIABLE") val snapshot = version
     val completed = entries.count { store.count(period, it.id, today) >= it.target }
     val progress = completed.toFloat() / entries.size.coerceAtLeast(1)
+
+    LaunchedEffect(pendingAdvanceId, periodId, today) {
+        val completedId = pendingAdvanceId ?: return@LaunchedEffect
+        delay(520)
+        if (entries.getOrNull(selectedIndex)?.id == completedId && store.autoAdvance) {
+            val next = WardNavigation.nextUnfinished(entries, selectedIndex) {
+                store.count(period, it.id, today) >= it.target
+            }
+            if (next != null) selectedIndex = next
+        }
+        pendingAdvanceId = null
+    }
 
     BackHandler(screen != "reader" || showCatalog) {
         if (showCatalog) showCatalog = false else screen = "reader"
