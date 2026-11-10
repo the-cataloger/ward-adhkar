@@ -277,54 +277,46 @@ private fun WardScreen(store: WardStore, openedPeriod: String, openSerial: Int) 
                     Spacer(Modifier.height(9.dp))
 
                     if (item != null) {
-                        RecitationCard(
-                            item, period, index + 1, entries.size,
-                            store.isFavorite(item.id), store.fontScale,
+                        ThumbRecitationCard(
+                            dhikr = item, period = period,
+                            ordinal = index + 1, total = entries.size,
+                            count = store.count(period, item.id, today),
+                            favorite = store.isFavorite(item.id),
+                            fontScale = store.fontScale,
+                            hapticsEnabled = store.hapticsEnabled,
+                            canNext = index < entries.lastIndex,
+                            canPrevious = index > 0,
                             onFavorite = { store.toggleFavorite(item.id); version++ },
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(Modifier.height(7.dp))
-
-                        // The counter remains the largest interactive target, in the center.
-                        Row(
-                            Modifier.fillMaxWidth().height(142.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OrnateNavButton(
-                                Icons.Default.ChevronLeft, "التالي",
-                                enabled = index < entries.lastIndex
-                            ) { selectedIndex = (index + 1).coerceAtMost(entries.lastIndex) }
-                            Counter(
-                                count = store.count(period, item.id, today),
-                                target = item.target,
-                                hapticsEnabled = store.hapticsEnabled,
-                                onIncrement = {
-                                    val previous = store.count(period, item.id, today)
-                                    if (previous < item.target) {
-                                        store.setCount(period, item.id, previous + 1, today)
-                                        if (store.countSoundEnabled) {
-                                            sounds.play(previous + 1 == item.target)
+                            onPrevious = {
+                                pendingAdvanceId = null
+                                selectedIndex = (index - 1).coerceAtLeast(0)
+                            },
+                            onNext = {
+                                pendingAdvanceId = null
+                                selectedIndex = (index + 1).coerceAtMost(entries.lastIndex)
+                            },
+                            onIncrement = {
+                                val previous = store.count(period, item.id, today)
+                                if (previous < item.target) {
+                                    val newCount = previous + 1
+                                    store.setCount(period, item.id, newCount, today)
+                                    if (store.countSoundEnabled) sounds.play(newCount == item.target)
+                                    version++
+                                    if (newCount == item.target) {
+                                        pendingAdvanceId = item.id
+                                        val next = WardNavigation.nextUnfinished(entries, index) {
+                                            store.count(period, it.id, today) >= it.target
                                         }
-                                        version++
-                                        if (previous + 1 == item.target) {
-                                            val next = WardNavigation.nextUnfinished(entries, index) {
-                                                store.count(period, it.id, today) >= it.target
-                                            }
-                                            if (next != null && store.autoAdvance) selectedIndex = next
-                                            if (next == null) {
-                                                ReminderScheduler.cancelPending(context, period)
-                                                ReminderScheduler.dismiss(context, period)
-                                            }
+                                        if (next == null) {
+                                            ReminderScheduler.cancelPending(context, period)
+                                            ReminderScheduler.dismiss(context, period)
                                         }
                                     }
                                 }
-                            )
-                            OrnateNavButton(
-                                Icons.Default.ChevronRight, "السابق",
-                                enabled = index > 0
-                            ) { selectedIndex = (index - 1).coerceAtLeast(0) }
-                        }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.height(8.dp))
 
                         // Everything secondary is placed beneath the reading and counting area.
                         Spacer(Modifier.height(2.dp))
