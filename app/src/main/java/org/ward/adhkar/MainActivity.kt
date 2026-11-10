@@ -68,6 +68,8 @@ import org.ward.adhkar.data.Period
 import org.ward.adhkar.data.WardStore
 import org.ward.adhkar.data.WardNavigation
 import org.ward.adhkar.ui.WardOrnament
+import org.ward.adhkar.ui.ThumbRecitationCard
+import kotlinx.coroutines.delay
 import org.ward.adhkar.notifications.ReminderScheduler
 import java.time.LocalDate
 import java.time.LocalTime
@@ -132,6 +134,7 @@ private fun WardScreen(store: WardStore, openedPeriod: String, openSerial: Int) 
     var favoritesOnly by rememberSaveable { mutableStateOf(false) }
     var today by remember { mutableStateOf(LocalDate.now()) }
     var version by remember { mutableIntStateOf(0) }
+    var pendingAdvanceId by remember { mutableStateOf<String?>(null) }
 
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner) {
@@ -165,6 +168,18 @@ private fun WardScreen(store: WardStore, openedPeriod: String, openSerial: Int) 
     @Suppress("UNUSED_VARIABLE") val snapshot = version
     val completed = entries.count { store.count(period, it.id, today) >= it.target }
     val progress = completed.toFloat() / entries.size.coerceAtLeast(1)
+
+    LaunchedEffect(pendingAdvanceId, periodId, today) {
+        val completedId = pendingAdvanceId ?: return@LaunchedEffect
+        delay(520)
+        if (entries.getOrNull(selectedIndex)?.id == completedId && store.autoAdvance) {
+            val next = WardNavigation.nextUnfinished(entries, selectedIndex) {
+                store.count(period, it.id, today) >= it.target
+            }
+            if (next != null) selectedIndex = next
+        }
+        pendingAdvanceId = null
+    }
 
     BackHandler(screen != "reader" || showCatalog) {
         if (showCatalog) showCatalog = false else screen = "reader"
@@ -262,54 +277,46 @@ private fun WardScreen(store: WardStore, openedPeriod: String, openSerial: Int) 
                     Spacer(Modifier.height(9.dp))
 
                     if (item != null) {
-                        RecitationCard(
-                            item, period, index + 1, entries.size,
-                            store.isFavorite(item.id), store.fontScale,
+                        ThumbRecitationCard(
+                            dhikr = item, period = period,
+                            ordinal = index + 1, total = entries.size,
+                            count = store.count(period, item.id, today),
+                            favorite = store.isFavorite(item.id),
+                            fontScale = store.fontScale,
+                            hapticsEnabled = store.hapticsEnabled,
+                            canNext = index < entries.lastIndex,
+                            canPrevious = index > 0,
                             onFavorite = { store.toggleFavorite(item.id); version++ },
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(Modifier.height(7.dp))
-
-                        // The counter remains the largest interactive target, in the center.
-                        Row(
-                            Modifier.fillMaxWidth().height(142.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OrnateNavButton(
-                                Icons.Default.ChevronLeft, "التالي",
-                                enabled = index < entries.lastIndex
-                            ) { selectedIndex = (index + 1).coerceAtMost(entries.lastIndex) }
-                            Counter(
-                                count = store.count(period, item.id, today),
-                                target = item.target,
-                                hapticsEnabled = store.hapticsEnabled,
-                                onIncrement = {
-                                    val previous = store.count(period, item.id, today)
-                                    if (previous < item.target) {
-                                        store.setCount(period, item.id, previous + 1, today)
-                                        if (store.countSoundEnabled) {
-                                            sounds.play(previous + 1 == item.target)
+                            onPrevious = {
+                                pendingAdvanceId = null
+                                selectedIndex = (index - 1).coerceAtLeast(0)
+                            },
+                            onNext = {
+                                pendingAdvanceId = null
+                                selectedIndex = (index + 1).coerceAtMost(entries.lastIndex)
+                            },
+                            onIncrement = {
+                                val previous = store.count(period, item.id, today)
+                                if (previous < item.target) {
+                                    val newCount = previous + 1
+                                    store.setCount(period, item.id, newCount, today)
+                                    if (store.countSoundEnabled) sounds.play(newCount == item.target)
+                                    version++
+                                    if (newCount == item.target) {
+                                        pendingAdvanceId = item.id
+                                        val next = WardNavigation.nextUnfinished(entries, index) {
+                                            store.count(period, it.id, today) >= it.target
                                         }
-                                        version++
-                                        if (previous + 1 == item.target) {
-                                            val next = WardNavigation.nextUnfinished(entries, index) {
-                                                store.count(period, it.id, today) >= it.target
-                                            }
-                                            if (next != null && store.autoAdvance) selectedIndex = next
-                                            if (next == null) {
-                                                ReminderScheduler.cancelPending(context, period)
-                                                ReminderScheduler.dismiss(context, period)
-                                            }
+                                        if (next == null) {
+                                            ReminderScheduler.cancelPending(context, period)
+                                            ReminderScheduler.dismiss(context, period)
                                         }
                                     }
                                 }
-                            )
-                            OrnateNavButton(
-                                Icons.Default.ChevronRight, "السابق",
-                                enabled = index > 0
-                            ) { selectedIndex = (index - 1).coerceAtLeast(0) }
-                        }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.height(8.dp))
 
                         // Everything secondary is placed beneath the reading and counting area.
                         Spacer(Modifier.height(2.dp))
@@ -463,41 +470,6 @@ private fun CircularIcon(icon: ImageVector, description: String, onClick: () -> 
 }
 
 @Composable
-private fun OrnateNavButton(
-    icon: ImageVector, title: String, enabled: Boolean, onClick: () -> Unit
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier.size(76.dp)
-                .shadow(8.dp, CircleShape, ambientColor = Gold.copy(alpha = .25f))
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        if (enabled) listOf(Color(0xFF3C5A43), Color(0xFF10251E))
-                        else listOf(Panel, Night)
-                    )
-                )
-                .border(2.dp, Gold.copy(alpha = if (enabled) .92f else .26f), CircleShape)
-                .clickable(enabled = enabled, onClick = onClick)
-                .semantics { contentDescription = title },
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    icon, null,
-                    tint = if (enabled) Gold else Muted.copy(alpha = .45f),
-                    modifier = Modifier.size(33.dp)
-                )
-                Text(
-                    title, color = if (enabled) Cream else Muted.copy(alpha = .45f),
-                    fontWeight = FontWeight.Bold, fontSize = 11.sp
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun QuickCircle(
     icon: ImageVector, title: String, enabled: Boolean = true, onClick: () -> Unit
 ) {
@@ -531,167 +503,6 @@ private fun QuickCircle(
             fontSize = 10.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center,
             maxLines = 1
         )
-    }
-}
-
-@Composable
-private fun RecitationCard(
-    dhikr: Dhikr, period: Period, ordinal: Int, total: Int,
-    favorite: Boolean, fontScale: Float, onFavorite: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
-    val scroll = rememberScrollState()
-    LaunchedEffect(dhikr.id, period) { scroll.scrollTo(0) }
-
-    Column(
-        modifier.fillMaxWidth()
-            .shadow(12.dp, RoundedCornerShape(28.dp), ambientColor = Gold.copy(alpha = .3f))
-            .clip(RoundedCornerShape(28.dp))
-            .background(
-                Brush.verticalGradient(
-                    listOf(Color(0xF0102B20), Color(0xF0081A13))
-                )
-            )
-            .border(1.5.dp, Gold.copy(alpha = .85f), RoundedCornerShape(28.dp))
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    dhikr.title, color = Gold, fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold, maxLines = 1
-                )
-                Text("الذكر $ordinal من $total", color = Muted, fontSize = 11.sp)
-            }
-            CircularIcon(
-                if (favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                if (favorite) "إزالة من المفضلة" else "إضافة إلى المفضلة", onFavorite
-            )
-            Spacer(Modifier.width(6.dp))
-            CircularIcon(Icons.Default.ContentCopy, "نسخ الذكر") {
-                clipboard.setText(AnnotatedString(dhikr.content(period) + "\nالمصدر: " + dhikr.source))
-            }
-            Spacer(Modifier.width(6.dp))
-            CircularIcon(Icons.Default.Share, "مشاركة الذكر") {
-                val message = dhikr.content(period) + "\n\nالمصدر: " + dhikr.source +
-                    "\nمن تطبيق وِرد"
-                val send = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, message)
-                }
-                context.startActivity(Intent.createChooser(send, "مشاركة الذكر"))
-            }
-        }
-        Spacer(Modifier.height(5.dp))
-        HorizontalDivider(color = Gold.copy(alpha = .28f))
-        Column(
-            Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Spacer(Modifier.height(11.dp))
-            SelectionContainer {
-                Text(
-                    dhikr.content(period),
-                    color = Cream,
-                    fontFamily = FontFamily.Serif,
-                    fontSize = (22 * fontScale).sp,
-                    lineHeight = (38 * fontScale).sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            Spacer(Modifier.height(11.dp))
-            if (dhikr.note.isNotEmpty()) {
-                Text(
-                    dhikr.note, color = Muted, fontSize = 12.sp,
-                    textAlign = TextAlign.Center, lineHeight = 19.sp
-                )
-            }
-        }
-        HorizontalDivider(color = Gold.copy(alpha = .28f))
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "المصدر: ${dhikr.source}",
-            color = Gold.copy(alpha = .92f), fontSize = 12.sp,
-            lineHeight = 18.sp, textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(), maxLines = 2
-        )
-    }
-}
-
-@Composable
-private fun Counter(
-    count: Int, target: Int, hapticsEnabled: Boolean,
-    onIncrement: () -> Unit
-) {
-    val haptic = LocalHapticFeedback.current
-    val done = count >= target
-    val remaining = (target - count).coerceAtLeast(0)
-    val ratio by animateFloatAsState(
-        (count.toFloat() / target.coerceAtLeast(1)).coerceIn(0f, 1f),
-        label = "counter_progress"
-    )
-    Box(
-        Modifier.size(142.dp)
-            .shadow(12.dp, CircleShape, ambientColor = Gold.copy(alpha = .30f))
-            .clip(CircleShape)
-            .background(
-                Brush.radialGradient(
-                    listOf(Color(0xFF345543), Color(0xFF11271E), Color(0xFF071611))
-                )
-            )
-            .border(5.dp, Gold, CircleShape)
-            .clickable(enabled = !done) {
-                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                onIncrement()
-            }
-            .semantics {
-                contentDescription = if (done) "اكتمل الذكر"
-                    else "العدّاد: $count من $target؛ اضغط مرة لكل تكرار"
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(Modifier.fillMaxSize()) {
-            val inset = 7.dp.toPx()
-            val diameter = size.minDimension - 2 * inset
-            drawArc(
-                color = Gold.copy(alpha = .18f),
-                startAngle = -90f, sweepAngle = 360f, useCenter = false,
-                topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
-                size = androidx.compose.ui.geometry.Size(diameter, diameter),
-                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-            )
-            drawArc(
-                color = Success,
-                startAngle = -90f, sweepAngle = ratio * 360f, useCenter = false,
-                topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
-                size = androidx.compose.ui.geometry.Size(diameter, diameter),
-                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-            )
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            if (done) {
-                Icon(
-                    Icons.Default.Check, null, tint = Gold,
-                    modifier = Modifier.size(32.dp)
-                )
-                Text("اكتمل الذكر", color = Cream, fontSize = 13.sp)
-            } else {
-                Text(
-                    "$remaining",
-                    color = Cream, fontSize = 47.sp,
-                    lineHeight = 48.sp, fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "اضغط للعدّ",
-                    color = Gold, fontWeight = FontWeight.Bold, fontSize = 14.sp
-                )
-                Text("$count من $target", color = Muted, fontSize = 11.sp)
-            }
-        }
     }
 }
 
